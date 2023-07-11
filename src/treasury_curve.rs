@@ -1,6 +1,8 @@
 use std::error::Error;
 use time::{Date, format_description};
 
+use crate::error::TreasuryCurveError;
+
 
 // implicit discriminator (starts at 0)
 const CURVE_LENGTH: usize = 13;
@@ -22,9 +24,11 @@ pub struct TreasuryCurveHistory {
     dates: Vec<Date>,
 }
 
-impl From<TreasuryCurveCsv> for TreasuryCurveHistory {
+impl TryFrom<TreasuryCurveCsv> for TreasuryCurveHistory {
+    type Error = TreasuryCurveError;
+
     /// convert csv file with header
-    fn from(value: TreasuryCurveCsv) -> Self {
+    fn try_from(value: TreasuryCurveCsv) -> Result<Self, Self::Error> {
         // check spacing relative to `CurveLocation`
         // if there is missing members than indicate None
         // any errors return an empty array
@@ -32,20 +36,20 @@ impl From<TreasuryCurveCsv> for TreasuryCurveHistory {
         // set flags based on headers - flag is 16 bits but only using first 13 to line up with labels
         let headers = lines[0].replace("\"", "");
         let headers: Vec<&str> = headers.split(",").collect();
-        let flags = active_flags(&headers);
+        let flags = active_flags(&headers)?;
         // load data into vector of `TreasuryCuve`
         let curves: Vec<TreasuryCurve> = lines.iter().skip(1).map(|l| load_curve(l, &flags)).collect();
         let dates: Vec<Date> = lines.iter().skip(1).map(|l| load_date(l)).collect();
         // use bittracking for understanding curve location
-        TreasuryCurveHistory { curves, dates }
+        Ok(TreasuryCurveHistory { curves, dates })
     }
 }
 
 impl TreasuryCurveHistory {
     // grab the highest date or latest curve in history 
-    pub fn latest(&self) -> Result<(Date, TreasuryCurve), Box<dyn Error>> {
+    pub fn latest(&self) -> Result<(Date, TreasuryCurve), TreasuryCurveError> {
         if self.curves.is_empty() {
-            Err("no curve loaded".into())
+            Err(TreasuryCurveError::NoData)
         } else {
             Ok((self.dates[0], self.curves[0]))
         }
@@ -53,16 +57,16 @@ impl TreasuryCurveHistory {
 }
 
 // determine of 13 labels which ones are active and exist
-fn active_flags(headers: &[&str]) -> u16 {
+fn active_flags(headers: &[&str]) -> Result<u16, TreasuryCurveError> {
     let mut flags = 0;
     // ignore first label as "DATE"
     for h in headers.iter().skip(1) {
         match search_labels(h) {
             Some(index) => {flags = flags | 1 << index},
-            None => { panic!("New Label program needs to be updated: label not included - {}", h)}
+            None => { return Err(TreasuryCurveError::MissingLabel(h.to_string())) }
         }
     }
-    flags
+    Ok(flags)
 }
 
 fn search_labels(label: &str) -> Option<usize> {
@@ -86,7 +90,8 @@ fn load_curve(data: &str, flags: &u16) -> TreasuryCurve {
 
 fn load_date(data: &str) -> Date {
     let fd = format_description::parse("[month]/[day]/[year]").unwrap();
-    Date::parse(data.split(",").next().unwrap(), &fd ).unwrap()
+    let string_date = data.split(",").next().unwrap();
+    Date::parse(&string_date, &fd ).unwrap()
 }
 
 #[cfg(test)]
@@ -96,15 +101,23 @@ mod tests {
     #[test]
     fn test_all_13_labels() {
         let headers = vec!("Date", "1 Mo", "2 Mo", "3 Mo", "4 Mo", "6 Mo", "1 Yr", "2 Yr", "3 Yr", "5 Yr", "7 Yr", "10 Yr", "20 Yr", "30 Yr");
-        let flags = active_flags(&headers);
+        let flags = active_flags(&headers).unwrap();
         assert_eq!(flags, 0b1111111111111);
     }
 
     #[test]
     fn test_missing_labels() {
         let headers = vec!("Date", "1 Mo", "2 Mo", "3 Mo", "6 Mo", "1 Yr", "2 Yr", "5 Yr", "7 Yr", "10 Yr", "20 Yr", "30 Yr");
-        let flags = active_flags(&headers);
+        let flags = active_flags(&headers).unwrap();
         assert_eq!(flags, 0b1111101110111);
+    }
+
+    #[test]
+    fn test_unrecognized_labels() {
+        // added unsupported label "9 Mo"
+        let headers = vec!("Date", "1 Mo", "2 Mo", "3 Mo", "4 Mo", "9 Mo", "1 Yr", "2 Yr", "3 Yr", "5 Yr", "7 Yr", "10 Yr", "20 Yr", "30 Yr");
+        let flags = active_flags(&headers);
+        assert!(flags.is_err());
     }
 
     #[test]
@@ -136,23 +149,24 @@ mod tests {
     fn check_data_on_old_curves() {
         // data from the year 2000
         let csvdata = 
-    r###"Date,"3 Mo","6 Mo","1 Yr","2 Yr","3 Yr","5 Yr","7 Yr","10 Yr","20 Yr","30 Yr"
-    12/29/2000,5.89,5.70,5.32,5.11,5.06,4.99,5.16,5.12,5.59,5.46
-    12/28/2000,5.87,5.79,5.40,5.18,5.12,5.02,5.21,5.13,5.59,5.44
-    12/27/2000,5.75,5.68,5.32,5.10,5.04,4.99,5.17,5.11,5.58,5.45
-    12/26/2000,5.85,5.76,5.31,5.10,5.00,4.92,5.09,5.04,5.54,5.41
-    12/22/2000,5.27,5.52,5.25,5.10,5.02,4.93,5.07,5.02,5.52,5.40
-    12/21/2000,5.38,5.64,5.33,5.14,5.04,4.94,5.10,5.03,5.53,5.41
-    12/20/2000,5.82,5.82,5.46,5.24,5.12,5.00,5.13,5.08,5.55,5.42
-    12/19/2000,5.93,5.93,5.58,5.35,5.23,5.12,5.22,5.19,5.61,5.47
-    12/18/2000,5.95,5.94,5.58,5.33,5.21,5.10,5.19,5.17,5.59,5.44
-    12/15/2000,6.02,5.99,5.65,5.38,5.26,5.15,5.24,5.20,5.59,5.44
-    12/14/2000,6.06,6.01,5.70,5.43,5.31,5.19,5.28,5.23,5.60,5.45
-    12/13/2000,6.06,6.03,5.74,5.45,5.34,5.24,5.33,5.29,5.64,5.48
-    12/12/2000,6.06,6.06,5.79,5.54,5.42,5.33,5.42,5.36,5.70,5.53
-    12/11/2000,6.08,6.06,5.79,5.52,5.43,5.33,5.42,5.37,5.71,5.54
-    12/08/2000,6.09,6.04,5.77,5.50,5.41,5.32,5.39,5.35,5.71,5.55"###;
-        let tc = TreasuryCurveHistory::from(TreasuryCurveCsv(csvdata.to_string()));
+r###"Date,"3 Mo","6 Mo","1 Yr","2 Yr","3 Yr","5 Yr","7 Yr","10 Yr","20 Yr","30 Yr"
+12/29/2000,5.89,5.70,5.32,5.11,5.06,4.99,5.16,5.12,5.59,5.46
+12/28/2000,5.87,5.79,5.40,5.18,5.12,5.02,5.21,5.13,5.59,5.44
+12/27/2000,5.75,5.68,5.32,5.10,5.04,4.99,5.17,5.11,5.58,5.45
+12/26/2000,5.85,5.76,5.31,5.10,5.00,4.92,5.09,5.04,5.54,5.41
+12/22/2000,5.27,5.52,5.25,5.10,5.02,4.93,5.07,5.02,5.52,5.40
+12/21/2000,5.38,5.64,5.33,5.14,5.04,4.94,5.10,5.03,5.53,5.41
+12/20/2000,5.82,5.82,5.46,5.24,5.12,5.00,5.13,5.08,5.55,5.42
+12/19/2000,5.93,5.93,5.58,5.35,5.23,5.12,5.22,5.19,5.61,5.47
+12/18/2000,5.95,5.94,5.58,5.33,5.21,5.10,5.19,5.17,5.59,5.44
+12/15/2000,6.02,5.99,5.65,5.38,5.26,5.15,5.24,5.20,5.59,5.44
+12/14/2000,6.06,6.01,5.70,5.43,5.31,5.19,5.28,5.23,5.60,5.45
+12/13/2000,6.06,6.03,5.74,5.45,5.34,5.24,5.33,5.29,5.64,5.48
+12/12/2000,6.06,6.06,5.79,5.54,5.42,5.33,5.42,5.36,5.70,5.53
+12/11/2000,6.08,6.06,5.79,5.52,5.43,5.33,5.42,5.37,5.71,5.54
+12/08/2000,6.09,6.04,5.77,5.50,5.41,5.32,5.39,5.35,5.71,5.55"###;
+        println!("{:?}", csvdata);
+        let tc = TreasuryCurveHistory::try_from(TreasuryCurveCsv(csvdata.to_string())).unwrap();
         let first_curve = tc.curves[0];
         assert_eq!(first_curve.0[0], None);
         assert_eq!(first_curve.0[1], None);
@@ -175,7 +189,7 @@ r###""Date,"1 Mo","2 Mo","3 Mo","4 Mo","6 Mo","1 Yr","2 Yr","3 Yr","5 Yr","7 Yr"
 06/28/2023,5.17,5.32,5.44,5.49,5.47,5.32,4.71,4.32,3.97,3.83,3.71,4.00,3.81
 06/27/2023,5.17,5.31,5.44,5.44,5.46,5.33,4.74,4.38,4.02,3.90,3.77,4.03,3.84
 06/26/2023,5.17,5.31,5.50,5.44,5.45,5.27,4.65,4.30,3.96,3.85,3.72,4.01,3.83"###;
-    let tc = TreasuryCurveHistory::from(TreasuryCurveCsv(csvdata.to_string()));
+    let tc = TreasuryCurveHistory::try_from(TreasuryCurveCsv(csvdata.to_string())).unwrap();
     let first_curve = tc.curves[0];
     assert_eq!(first_curve.0[0], Some(5.32));
     assert_eq!(first_curve.0[1], Some(5.47));

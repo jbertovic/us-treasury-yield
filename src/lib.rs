@@ -5,7 +5,9 @@
 //! 
 pub mod treasury_curve;
 pub mod request;
+pub mod error;
 
+use error::TreasuryCurveError;
 use time::{OffsetDateTime, Date};
 use treasury_curve::{TreasuryCurve, TreasuryCurveCsv};
 use request::fetch_csv_year;
@@ -13,8 +15,8 @@ use treasury_curve::TreasuryCurveHistory;
 
 const MIN_YEAR_AVAIL: i32 = 1990;
 
-pub fn fetch_latest() -> Result<(Date, TreasuryCurve), Box<dyn std::error::Error>> {
-    TreasuryCurveHistory::from(TreasuryCurveCsv(fetch_csv_year(current_year())?)).latest()
+pub fn fetch_latest() -> Result<(Date, TreasuryCurve), TreasuryCurveError> {
+    TreasuryCurveHistory::try_from(TreasuryCurveCsv(fetch_csv_year(current_year())?))?.latest()
 }
 
 fn current_year() -> i32 {

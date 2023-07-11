@@ -1,8 +1,7 @@
 use curl::easy::Easy;
+use crate::{MIN_YEAR_AVAIL, error::TreasuryCurveError, current_year};
 
-use crate::MIN_YEAR_AVAIL;
-
-pub fn fetch_csv_year(year: i32) -> Result<String, Box<dyn std::error::Error>> {
+pub fn fetch_csv_year(year: i32) -> Result<String, TreasuryCurveError> {
     let mut easy = Easy::new();
     let mut buffer = Vec::new();
 
@@ -19,8 +18,8 @@ pub fn fetch_csv_year(year: i32) -> Result<String, Box<dyn std::error::Error>> {
     Ok(String::from_utf8(buffer)?)
 }
 
-fn treasury_url(year: i32) -> Result<String, Box<dyn std::error::Error>> {
-    if year < MIN_YEAR_AVAIL { return Err("Treasury Curve not available for years less than 1990".into())}
+fn treasury_url(year: i32) -> Result<String, TreasuryCurveError> {
+    if (year < MIN_YEAR_AVAIL) || (year > current_year()) { return Err(TreasuryCurveError::InvalidYear(year))}
     Ok(format!("https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/{year}/all?type=daily_treasury_yield_curve&page&_format=csv"))
 }
 
