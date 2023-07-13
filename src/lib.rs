@@ -6,22 +6,29 @@
 pub mod error;
 pub mod request;
 pub mod treasury_curve;
+mod utility;
 
 use error::TreasuryCurveError;
 use request::fetch_csv_year;
-use time::{Date, OffsetDateTime};
+use time::Date;
 use treasury_curve::TreasuryCurveHistory;
 use treasury_curve::{TreasuryCurve, TreasuryCurveCsv};
+use utility::current_year;
 
 const MIN_YEAR_AVAIL: i32 = 1990;
 
 pub fn fetch_latest() -> Result<(Date, TreasuryCurve), TreasuryCurveError> {
-    TreasuryCurveHistory::try_from(TreasuryCurveCsv(fetch_csv_year(current_year())?))?.latest()
+    fetch_year(current_year())?.latest()
 }
 
-fn current_year() -> i32 {
-    OffsetDateTime::now_utc().year()
+pub fn fetch_date(date: Date) -> Result<(Date, TreasuryCurve), TreasuryCurveError> {
+    todo!()
 }
+
+pub fn fetch_year(year: i32) -> Result<TreasuryCurveHistory, TreasuryCurveError> {
+    TreasuryCurveHistory::try_from(TreasuryCurveCsv(fetch_csv_year(year)?))
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -35,7 +42,11 @@ mod tests {
 
     #[test]
     fn fetch_date_treasury_curve() {
-        todo!()
+        // data exists on this day
+        let exist_date = Date::from_calendar_date(2023, time::Month::July, 5);
+        //assert_eq!(fetch_date(exist_date).get("1 Mo"));
+        // data does not exist on this day -> use the day prior
+        let nonexist_date = Date::from_calendar_date(2023, time::Month::July, 2);
     }
 
     #[test]

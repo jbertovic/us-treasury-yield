@@ -13,6 +13,15 @@ const CURVE_LABELS: [&str; CURVE_LENGTH] = [
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TreasuryCurve([Option<f64>; 13]);
 
+impl TreasuryCurve {
+    pub fn get_label(&self, label: &str) -> Result<Option<f64>, TreasuryCurveError> {
+        match search_labels(label) {
+            Some(index) => Ok(self.0[index]),
+            None => Err(TreasuryCurveError::MissingLabel(label.to_string()))
+        }
+    }
+}
+
 /// stores the treasury curve in csv format as fetched from
 /// https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/{year}/all?type=daily_treasury_yield_curve&page&_format=csv
 pub struct TreasuryCurveCsv(pub String);
@@ -58,6 +67,12 @@ impl TreasuryCurveHistory {
         } else {
             Ok((self.dates[0], self.curves[0]))
         }
+    }
+
+    // grab the date specified or a date prior if curve does not exist for specified date
+    pub fn from_date(&self) -> Result<(Date, TreasuryCurve), TreasuryCurveError> {
+        // check that date request matches the date range of the data
+        todo!()
     }
 }
 
