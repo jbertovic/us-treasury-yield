@@ -1,5 +1,5 @@
+use crate::{current_year, error::TreasuryCurveError, MIN_YEAR_AVAIL};
 use curl::easy::Easy;
-use crate::{MIN_YEAR_AVAIL, error::TreasuryCurveError, current_year};
 
 pub fn fetch_csv_year(year: i32) -> Result<String, TreasuryCurveError> {
     let mut easy = Easy::new();
@@ -19,14 +19,16 @@ pub fn fetch_csv_year(year: i32) -> Result<String, TreasuryCurveError> {
 }
 
 fn treasury_url(year: i32) -> Result<String, TreasuryCurveError> {
-    if (year < MIN_YEAR_AVAIL) || (year > current_year()) { return Err(TreasuryCurveError::InvalidYear(year))}
+    if (year < MIN_YEAR_AVAIL) || (year > current_year()) {
+        return Err(TreasuryCurveError::InvalidYear(year));
+    }
     Ok(format!("https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/{year}/all?type=daily_treasury_yield_curve&page&_format=csv"))
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::current_year;
     use super::*;
+    use crate::current_year;
 
     #[test]
     fn fetch_treasury_csv_data() {

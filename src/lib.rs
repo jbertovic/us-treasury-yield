@@ -1,17 +1,17 @@
 //! US Treseary Yield Curve
-//! 
+//!
 //! library fetches from https://home.treasury.gov/policy-issues/financing-the-government/interest-rate-statistics/legacy-interest-rate-xml-and-xsd-files
-//! 
-//! 
-pub mod treasury_curve;
-pub mod request;
+//!
+//!
 pub mod error;
+pub mod request;
+pub mod treasury_curve;
 
 use error::TreasuryCurveError;
-use time::{OffsetDateTime, Date};
-use treasury_curve::{TreasuryCurve, TreasuryCurveCsv};
 use request::fetch_csv_year;
+use time::{Date, OffsetDateTime};
 use treasury_curve::TreasuryCurveHistory;
+use treasury_curve::{TreasuryCurve, TreasuryCurveCsv};
 
 const MIN_YEAR_AVAIL: i32 = 1990;
 
@@ -47,5 +47,4 @@ mod tests {
     fn fetch_date_treasury_curve_data_point() {
         todo!()
     }
-
 }
