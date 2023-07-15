@@ -1,5 +1,5 @@
 use crate::error::TreasuryCurveError;
-use time::{format_description, Date};
+use time::{ext::NumericalDuration, format_description, Date};
 
 // implicit discriminator (starts at 0)
 const CURVE_LENGTH: usize = 13;
@@ -14,10 +14,11 @@ const CURVE_LABELS: [&str; CURVE_LENGTH] = [
 pub struct TreasuryCurve([Option<f64>; 13]);
 
 impl TreasuryCurve {
+    /// *********************  CHECK .... TODO  ********Build in tests below**************************
     pub fn get_label(&self, label: &str) -> Result<Option<f64>, TreasuryCurveError> {
         match search_labels(label) {
             Some(index) => Ok(self.0[index]),
-            None => Err(TreasuryCurveError::MissingLabel(label.to_string()))
+            None => Err(TreasuryCurveError::MissingLabel(label.to_string())),
         }
     }
 }
@@ -69,10 +70,42 @@ impl TreasuryCurveHistory {
         }
     }
 
-    // grab the date specified or a date prior if curve does not exist for specified date
-    pub fn from_date(&self) -> Result<(Date, TreasuryCurve), TreasuryCurveError> {
-        // check that date request matches the date range of the data
-        todo!()
+    /// grab the date specified or a date prior if curve does not exist for specified date
+    /// allow 5 days after last published curve
+    pub fn from_date(
+        &self,
+        request_date: Date,
+    ) -> Result<(Date, TreasuryCurve), TreasuryCurveError> {
+        // check that date request matches the year range of the data
+        if request_date < *self.dates.last().unwrap()
+            && request_date > (*self.dates.first().unwrap() + 5.days())
+        {
+            Err(TreasuryCurveError::OutsideDateRange(
+                request_date.to_string(),
+            ))
+        } else {
+            let index = self.closest_date(request_date);
+            Ok((self.dates[index], self.curves[index]))
+        }
+    }
+
+    // grab exact date or closest working backwards in time
+    fn closest_date(&self, request_date: Date) -> usize {
+        if request_date >= *self.dates.first().unwrap() {
+            0
+        } else if request_date <= *self.dates.last().unwrap() {
+            self.dates.len() - 1
+        } else {
+            let mut index = 0;
+            let mut found = false;
+            while !found {
+                index += 1;
+                if self.dates[index] <= request_date {
+                    found = true;
+                }
+            }
+            index
+        }
     }
 }
 
@@ -141,6 +174,19 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn new_csv_data() -> &'static str {
+        r###""Date,"1 Mo","2 Mo","3 Mo","4 Mo","6 Mo","1 Yr","2 Yr","3 Yr","5 Yr","7 Yr","10 Yr","20 Yr","30 Yr"
+07/07/2023,5.32,5.47,5.46,5.52,5.53,5.41,4.94,4.64,4.35,4.23,4.06,4.27,4.05
+07/06/2023,5.32,5.47,5.46,5.52,5.54,5.44,4.99,4.68,4.37,4.22,4.05,4.23,4.01
+07/05/2023,5.28,5.38,5.44,5.51,5.52,5.40,4.94,4.59,4.25,4.11,3.95,4.17,3.95
+07/03/2023,5.27,5.40,5.44,5.52,5.53,5.43,4.94,4.56,4.19,4.03,3.86,4.08,3.87
+06/30/2023,5.24,5.39,5.43,5.50,5.47,5.40,4.87,4.49,4.13,3.97,3.81,4.06,3.85
+06/29/2023,5.25,5.40,5.46,5.51,5.50,5.41,4.87,4.49,4.14,3.99,3.85,4.11,3.92
+06/28/2023,5.17,5.32,5.44,5.49,5.47,5.32,4.71,4.32,3.97,3.83,3.71,4.00,3.81
+06/27/2023,5.17,5.31,5.44,5.44,5.46,5.33,4.74,4.38,4.02,3.90,3.77,4.03,3.84
+06/26/2023,5.17,5.31,5.50,5.44,5.45,5.27,4.65,4.30,3.96,3.85,3.72,4.01,3.83"###
+    }
 
     #[test]
     fn test_all_13_labels() {
@@ -219,7 +265,6 @@ mod tests {
 12/12/2000,6.06,6.06,5.79,5.54,5.42,5.33,5.42,5.36,5.70,5.53
 12/11/2000,6.08,6.06,5.79,5.52,5.43,5.33,5.42,5.37,5.71,5.54
 12/08/2000,6.09,6.04,5.77,5.50,5.41,5.32,5.39,5.35,5.71,5.55"###;
-        println!("{:?}", csvdata);
         let tc = TreasuryCurveHistory::try_from(TreasuryCurveCsv(csvdata.to_string())).unwrap();
         let first_curve = tc.curves[0];
         assert_eq!(first_curve.0[0], None);
@@ -231,16 +276,7 @@ mod tests {
     #[test]
     fn check_data_on_new_curves() {
         // data from year 2023
-        let csvdata = r###""Date,"1 Mo","2 Mo","3 Mo","4 Mo","6 Mo","1 Yr","2 Yr","3 Yr","5 Yr","7 Yr","10 Yr","20 Yr","30 Yr"
-07/07/2023,5.32,5.47,5.46,5.52,5.53,5.41,4.94,4.64,4.35,4.23,4.06,4.27,4.05
-07/06/2023,5.32,5.47,5.46,5.52,5.54,5.44,4.99,4.68,4.37,4.22,4.05,4.23,4.01
-07/05/2023,5.28,5.38,5.44,5.51,5.52,5.40,4.94,4.59,4.25,4.11,3.95,4.17,3.95
-07/03/2023,5.27,5.40,5.44,5.52,5.53,5.43,4.94,4.56,4.19,4.03,3.86,4.08,3.87
-06/30/2023,5.24,5.39,5.43,5.50,5.47,5.40,4.87,4.49,4.13,3.97,3.81,4.06,3.85
-06/29/2023,5.25,5.40,5.46,5.51,5.50,5.41,4.87,4.49,4.14,3.99,3.85,4.11,3.92
-06/28/2023,5.17,5.32,5.44,5.49,5.47,5.32,4.71,4.32,3.97,3.83,3.71,4.00,3.81
-06/27/2023,5.17,5.31,5.44,5.44,5.46,5.33,4.74,4.38,4.02,3.90,3.77,4.03,3.84
-06/26/2023,5.17,5.31,5.50,5.44,5.45,5.27,4.65,4.30,3.96,3.85,3.72,4.01,3.83"###;
+        let csvdata = new_csv_data();
         let tc = TreasuryCurveHistory::try_from(TreasuryCurveCsv(csvdata.to_string())).unwrap();
         let first_curve = tc.curves[0];
         assert_eq!(first_curve.0[0], Some(5.32));
@@ -262,5 +298,31 @@ mod tests {
         let (primary, secondary) = sort_arrays(primary, secondary, false);
         dbg!(&primary, &secondary);
         assert_eq!(secondary, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn check_closest_date() {
+        let csvdata = new_csv_data();
+        let tc = TreasuryCurveHistory::try_from(TreasuryCurveCsv(csvdata.to_string())).unwrap();
+        // date is below range
+        assert_eq!(
+            tc.closest_date(Date::from_calendar_date(2023, time::Month::June, 25).unwrap()),
+            8
+        );
+        // date is exact
+        assert_eq!(
+            tc.closest_date(Date::from_calendar_date(2023, time::Month::July, 3).unwrap()),
+            3
+        );
+        // date is above range
+        assert_eq!(
+            tc.closest_date(Date::from_calendar_date(2023, time::Month::July, 2).unwrap()),
+            4
+        );
+        // date doesn't exist grab closest
+        assert_eq!(
+            tc.closest_date(Date::from_calendar_date(2023, time::Month::July, 10).unwrap()),
+            0
+        );
     }
 }

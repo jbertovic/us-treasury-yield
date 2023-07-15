@@ -21,14 +21,13 @@ pub fn fetch_latest() -> Result<(Date, TreasuryCurve), TreasuryCurveError> {
     fetch_year(current_year())?.latest()
 }
 
-pub fn fetch_date(date: Date) -> Result<(Date, TreasuryCurve), TreasuryCurveError> {
-    todo!()
+pub fn fetch_date(request_date: Date) -> Result<(Date, TreasuryCurve), TreasuryCurveError> {
+    fetch_year(request_date.year())?.from_date(request_date)
 }
 
-pub fn fetch_year(year: i32) -> Result<TreasuryCurveHistory, TreasuryCurveError> {
-    TreasuryCurveHistory::try_from(TreasuryCurveCsv(fetch_csv_year(year)?))
+pub fn fetch_year(requst_year: i32) -> Result<TreasuryCurveHistory, TreasuryCurveError> {
+    TreasuryCurveHistory::try_from(TreasuryCurveCsv(fetch_csv_year(requst_year)?))
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -43,19 +42,24 @@ mod tests {
     #[test]
     fn fetch_date_treasury_curve() {
         // data exists on this day
-        let exist_date = Date::from_calendar_date(2023, time::Month::July, 5);
-        //assert_eq!(fetch_date(exist_date).get("1 Mo"));
-        // data does not exist on this day -> use the day prior
-        let nonexist_date = Date::from_calendar_date(2023, time::Month::July, 2);
+        let exist_date = Date::from_calendar_date(2023, time::Month::July, 5).unwrap();
+        assert_eq!(fetch_date(exist_date).unwrap().0, exist_date);
+        // data does not exist on this day Jul 2 is a weeekend -> use the day prior which is June 30
+        let nonexist_date = Date::from_calendar_date(2023, time::Month::July, 2).unwrap();
+        let nonexist_date_check = Date::from_calendar_date(2023, time::Month::June, 30).unwrap();
+        assert_eq!(fetch_date(nonexist_date).unwrap().0, nonexist_date_check);
     }
 
     #[test]
     fn fetch_date_treasury_curve_date_does_not_exist() {
+        // make sure I'm getting an error for a bad year
         todo!()
     }
 
     #[test]
-    fn fetch_date_treasury_curve_data_point() {
+    fn fetch_date_treasury_curve_for_various_test_dates() {
+        // pick 6 dates in history and check each date against 2 points in the curve
+        // (1)use old dates, (2) weekend, (3) holiday, (4) recent date, (5) end of year, (6) beginning of year
         todo!()
     }
 }
