@@ -1,9 +1,9 @@
-use crate::error::TreasuryCurveError;
-use time::{ext::NumericalDuration, format_description, Date};
+use crate::{error::TreasuryCurveError, utility, MAX_FORWARD_DAYS};
+use time::{ext::NumericalDuration, Date};
 
 // implicit discriminator (starts at 0)
 const CURVE_LENGTH: usize = 13;
-const CURVE_LABELS: [&str; CURVE_LENGTH] = [
+pub const CURVE_LABELS: [&str; CURVE_LENGTH] = [
     "1 Mo", "2 Mo", "3 Mo", "4 Mo", "6 Mo", "1 Yr", "2 Yr", "3 Yr", "5 Yr", "7 Yr", "10 Yr",
     "20 Yr", "30 Yr",
 ];
@@ -14,7 +14,6 @@ const CURVE_LABELS: [&str; CURVE_LENGTH] = [
 pub struct TreasuryCurve([Option<f64>; 13]);
 
 impl TreasuryCurve {
-    /// *********************  CHECK .... TODO  ********Build in tests below**************************
     pub fn get_label(&self, label: &str) -> Result<Option<f64>, TreasuryCurveError> {
         match search_labels(label) {
             Some(index) => Ok(self.0[index]),
@@ -23,11 +22,11 @@ impl TreasuryCurve {
     }
 }
 
-/// stores the treasury curve in csv format as fetched from
-/// https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/{year}/all?type=daily_treasury_yield_curve&page&_format=csv
+/// stores the treasury curve in csv format as fetched from US Treasury website
 pub struct TreasuryCurveCsv(pub String);
 
-#[derive(Debug, Default)]
+/// Hold Treasury Curve history
+#[derive(Debug)]
 /// curve history stored in reverse with latest at top
 pub struct TreasuryCurveHistory {
     curves: Vec<TreasuryCurve>,
@@ -61,13 +60,9 @@ impl TryFrom<TreasuryCurveCsv> for TreasuryCurveHistory {
 }
 
 impl TreasuryCurveHistory {
-    // grab the highest date or latest curve in history
-    pub fn latest(&self) -> Result<(Date, TreasuryCurve), TreasuryCurveError> {
-        if self.curves.is_empty() {
-            Err(TreasuryCurveError::NoData)
-        } else {
-            Ok((self.dates[0], self.curves[0]))
-        }
+    /// grab the latest date in curve history
+    pub fn latest(&self) -> (Date, TreasuryCurve) {
+        (self.dates[0], self.curves[0])
     }
 
     /// grab the date specified or a date prior if curve does not exist for specified date
@@ -78,7 +73,7 @@ impl TreasuryCurveHistory {
     ) -> Result<(Date, TreasuryCurve), TreasuryCurveError> {
         // check that date request matches the year range of the data
         if request_date < *self.dates.last().unwrap()
-            && request_date > (*self.dates.first().unwrap() + 5.days())
+            || request_date > (*self.dates.first().unwrap() + MAX_FORWARD_DAYS.days())
         {
             Err(TreasuryCurveError::OutsideDateRange(
                 request_date.to_string(),
@@ -126,8 +121,10 @@ fn search_labels(label: &str) -> Option<usize> {
     CURVE_LABELS.iter().position(|l| (*l).eq(label))
 }
 
+// TODO: Look for missing data where a column is missing half way through the year!
 // load raw data into curve depending on which bits are active in flags
 fn load_curve(data: &str, flags: &u16) -> TreasuryCurve {
+    dbg!(data, flags);
     let mut data: Vec<Option<f64>> = data
         .split(',')
         .skip(1)
@@ -150,7 +147,8 @@ fn load_curve(data: &str, flags: &u16) -> TreasuryCurve {
 }
 
 fn load_date(data: &str) -> Date {
-    let fd = format_description::parse("[month]/[day]/[year]").unwrap();
+    let fd = utility::date_format_desc();
+    //let fd = format_description::parse("[month]/[day]/[year]").unwrap();
     let string_date = data.split(',').next().unwrap();
     Date::parse(string_date, &fd).unwrap()
 }
@@ -224,8 +222,8 @@ mod tests {
         let data = "07/07/2023,5.32,5.47,5.46,5.52,5.53,5.41,4.94,4.64,4.35,4.23,4.06,4.27,4.05";
         let flags: u16 = 0b1111111111111;
         let curve = load_curve(data, &flags);
-        assert_eq!(curve.0[0], Some(5.32));
-        assert_eq!(curve.0[12], Some(4.05));
+        assert_eq!(curve.get_label("1 Mo").unwrap(), Some(5.32));
+        assert_eq!(curve.get_label("30 Yr").unwrap(), Some(4.05));
 
         // data must be reduced to match number of flags or it will ***PANIC***
         let data = "07/07/2023,5.32,5.47,5.46,5.52,5.53,5.41,4.94,4.64,4.35,4.23";
@@ -267,10 +265,10 @@ mod tests {
 12/08/2000,6.09,6.04,5.77,5.50,5.41,5.32,5.39,5.35,5.71,5.55"###;
         let tc = TreasuryCurveHistory::try_from(TreasuryCurveCsv(csvdata.to_string())).unwrap();
         let first_curve = tc.curves[0];
-        assert_eq!(first_curve.0[0], None);
-        assert_eq!(first_curve.0[1], None);
-        assert_eq!(first_curve.0[2], Some(5.89));
-        assert_eq!(first_curve.0[12], Some(5.46));
+        assert_eq!(first_curve.get_label("1 Mo").unwrap(), None);
+        assert_eq!(first_curve.get_label("2 Mo").unwrap(), None);
+        assert_eq!(first_curve.get_label("3 Mo").unwrap(), Some(5.89));
+        assert_eq!(first_curve.get_label("30 Yr").unwrap(), Some(5.46));
     }
 
     #[test]
@@ -289,7 +287,7 @@ mod tests {
     fn check_two_arrays_are_sorted_by_first_array() {
         let primary = vec!["07/01/2023", "07/10/2023", "06/25/2023", "08/01/2023"];
         let secondary = vec![3, 2, 4, 1];
-        let fd = format_description::parse("[month]/[day]/[year]").unwrap();
+        let fd = utility::date_format_desc();
         let primary: Vec<Date> = primary
             .into_iter()
             .map(|d| Date::parse(d, &fd).unwrap())
@@ -323,6 +321,17 @@ mod tests {
         assert_eq!(
             tc.closest_date(Date::from_calendar_date(2023, time::Month::July, 10).unwrap()),
             0
+        );
+    }
+
+    #[test]
+    fn check_if_label_does_not_exist_throws_error() {
+        let csvdata = new_csv_data();
+        let tc = TreasuryCurveHistory::try_from(TreasuryCurveCsv(csvdata.to_string())).unwrap();
+        let error_str = "does_not_exist".to_string();
+        assert_eq!(
+            tc.latest().1.get_label(&error_str).unwrap_err(),
+            TreasuryCurveError::MissingLabel(error_str)
         );
     }
 }

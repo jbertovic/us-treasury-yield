@@ -1,7 +1,8 @@
 use crate::{current_year, error::TreasuryCurveError, MIN_YEAR_AVAIL};
 use curl::easy::Easy;
 
-pub fn fetch_csv_year(year: i32) -> Result<String, TreasuryCurveError> {
+/// Fetch csv data for one year
+pub(crate) fn fetch_csv_year(year: i32) -> Result<String, TreasuryCurveError> {
     let mut easy = Easy::new();
     let mut buffer = Vec::new();
 
