@@ -3,10 +3,34 @@ use time::{ext::NumericalDuration, Date};
 
 // implicit discriminator (starts at 0)
 const CURVE_LENGTH: usize = 13;
-pub const CURVE_LABELS: [&str; CURVE_LENGTH] = [
+const CURVE_HEADERS: [&str; CURVE_LENGTH] = [
     "1 Mo", "2 Mo", "3 Mo", "4 Mo", "6 Mo", "1 Yr", "2 Yr", "3 Yr", "5 Yr", "7 Yr", "10 Yr",
     "20 Yr", "30 Yr",
 ];
+
+/// Labels for the Treasury curve
+#[derive(Copy, Clone)]
+pub enum Label {
+    Mo1,
+    Mo2,
+    Mo3,
+    Mo4,
+    Mo6,
+    Yr1,
+    Yr2,
+    Yr3,
+    Yr5,
+    Yr7,
+    Yr10,
+    Yr20,
+    Yr30,
+}
+
+impl Label {
+    pub fn index(&self) -> usize {
+        *self as usize
+    }
+}
 
 /// Captures one curve for a single date
 /// order of data matches 'CURVE_LABELS'
@@ -14,11 +38,8 @@ pub const CURVE_LABELS: [&str; CURVE_LENGTH] = [
 pub struct TreasuryCurve([Option<f64>; 13]);
 
 impl TreasuryCurve {
-    pub fn get_label(&self, label: &str) -> Result<Option<f64>, TreasuryCurveError> {
-        match search_labels(label) {
-            Some(index) => Ok(self.0[index]),
-            None => Err(TreasuryCurveError::MissingLabel(label.to_string())),
-        }
+    pub fn get_label(&self, label: Label) -> Option<f64> {
+        self.0[label.index()]
     }
 }
 
@@ -118,17 +139,15 @@ fn active_flags(headers: &[&str]) -> Result<u16, TreasuryCurveError> {
 }
 
 fn search_labels(label: &str) -> Option<usize> {
-    CURVE_LABELS.iter().position(|l| (*l).eq(label))
+    CURVE_HEADERS.iter().position(|l| (*l).eq(label))
 }
 
-// TODO: Look for missing data where a column is missing half way through the year!
 // load raw data into curve depending on which bits are active in flags
 fn load_curve(data: &str, flags: &u16) -> TreasuryCurve {
-    dbg!(data, flags);
     let mut data: Vec<Option<f64>> = data
         .split(',')
         .skip(1)
-        .map(|d| Some(d.parse::<f64>().unwrap()))
+        .map(|d| d.parse::<f64>().ok())
         .collect();
     if u16::count_ones(*flags) != 13 {
         // search for zero bits in flag and shift data vector over
@@ -147,7 +166,7 @@ fn load_curve(data: &str, flags: &u16) -> TreasuryCurve {
 }
 
 fn load_date(data: &str) -> Date {
-    let fd = utility::date_format_desc();
+    let fd = utility::date_format_header();
     //let fd = format_description::parse("[month]/[day]/[year]").unwrap();
     let string_date = data.split(',').next().unwrap();
     Date::parse(string_date, &fd).unwrap()
@@ -222,8 +241,8 @@ mod tests {
         let data = "07/07/2023,5.32,5.47,5.46,5.52,5.53,5.41,4.94,4.64,4.35,4.23,4.06,4.27,4.05";
         let flags: u16 = 0b1111111111111;
         let curve = load_curve(data, &flags);
-        assert_eq!(curve.get_label("1 Mo").unwrap(), Some(5.32));
-        assert_eq!(curve.get_label("30 Yr").unwrap(), Some(4.05));
+        assert_eq!(curve.get_label(Label::Mo1), Some(5.32));
+        assert_eq!(curve.get_label(Label::Yr30), Some(4.05));
 
         // data must be reduced to match number of flags or it will ***PANIC***
         let data = "07/07/2023,5.32,5.47,5.46,5.52,5.53,5.41,4.94,4.64,4.35,4.23";
@@ -232,6 +251,25 @@ mod tests {
         assert_eq!(missingcurve.0[1], None);
         assert_eq!(missingcurve.0[3], None);
         assert_eq!(missingcurve.0[5], None);
+    }
+
+    #[test]
+    fn check_parsing_curve_data_with_missing_point_into_treasurycurve() {
+        let data = "07/07/2023,5.32,,5.46,5.52,5.53,5.41,4.94,4.64,4.35,4.23,4.06,4.27,4.05";
+        let flags: u16 = 0b1111111111111;
+        let curve = load_curve(data, &flags);
+        assert_eq!(curve.get_label(Label::Mo1), Some(5.32));
+        assert_eq!(curve.get_label(Label::Mo2), None);
+        assert_eq!(curve.get_label(Label::Yr30), Some(4.05));
+
+        // data must be reduced to match number of flags or it will ***PANIC***
+        let data = "07/07/2023,5.32,5.47,5.46,5.52,5.53,5.41,4.94,4.64,4.35,";
+        let missingflags: u16 = 0b1111111010101;
+        let missingcurve = load_curve(data, &missingflags);
+        assert_eq!(missingcurve.0[1], None);
+        assert_eq!(missingcurve.0[3], None);
+        assert_eq!(missingcurve.0[5], None);
+        assert_eq!(missingcurve.0[12], None);
     }
 
     #[test]
@@ -265,10 +303,10 @@ mod tests {
 12/08/2000,6.09,6.04,5.77,5.50,5.41,5.32,5.39,5.35,5.71,5.55"###;
         let tc = TreasuryCurveHistory::try_from(TreasuryCurveCsv(csvdata.to_string())).unwrap();
         let first_curve = tc.curves[0];
-        assert_eq!(first_curve.get_label("1 Mo").unwrap(), None);
-        assert_eq!(first_curve.get_label("2 Mo").unwrap(), None);
-        assert_eq!(first_curve.get_label("3 Mo").unwrap(), Some(5.89));
-        assert_eq!(first_curve.get_label("30 Yr").unwrap(), Some(5.46));
+        assert_eq!(first_curve.get_label(Label::Mo1), None);
+        assert_eq!(first_curve.get_label(Label::Mo2), None);
+        assert_eq!(first_curve.get_label(Label::Mo3), Some(5.89));
+        assert_eq!(first_curve.get_label(Label::Yr30), Some(5.46));
     }
 
     #[test]
@@ -287,7 +325,7 @@ mod tests {
     fn check_two_arrays_are_sorted_by_first_array() {
         let primary = vec!["07/01/2023", "07/10/2023", "06/25/2023", "08/01/2023"];
         let secondary = vec![3, 2, 4, 1];
-        let fd = utility::date_format_desc();
+        let fd = utility::date_format_header();
         let primary: Vec<Date> = primary
             .into_iter()
             .map(|d| Date::parse(d, &fd).unwrap())
@@ -321,17 +359,6 @@ mod tests {
         assert_eq!(
             tc.closest_date(Date::from_calendar_date(2023, time::Month::July, 10).unwrap()),
             0
-        );
-    }
-
-    #[test]
-    fn check_if_label_does_not_exist_throws_error() {
-        let csvdata = new_csv_data();
-        let tc = TreasuryCurveHistory::try_from(TreasuryCurveCsv(csvdata.to_string())).unwrap();
-        let error_str = "does_not_exist".to_string();
-        assert_eq!(
-            tc.latest().1.get_label(&error_str).unwrap_err(),
-            TreasuryCurveError::MissingLabel(error_str)
         );
     }
 }

@@ -31,7 +31,19 @@ pub fn fetch_latest() -> Result<(Date, TreasuryCurve), TreasuryCurveError> {
 /// fetch a specific date of the Tresury curve
 /// Defaults to the last known data point on weekend and holidays
 pub fn fetch_date(request_date: Date) -> Result<(Date, TreasuryCurve), TreasuryCurveError> {
-    fetch_year(request_date.year())?.from_date(request_date)
+    // special dates are the first 4 days of the year as there may be no data because of weekends
+    // and holiday therefore need to go back and fetch the year prior as well if we get a `OutsideDateRange` Error
+    match fetch_year(request_date.year())?.from_date(request_date) {
+        Ok((date, curve)) => Ok((date, curve)),
+        Err(TreasuryCurveError::OutsideDateRange(d)) => {
+            if date_at_start_of_year(&d) {
+                Ok(fetch_year(request_date.year() - 1)?.latest())
+            } else {
+                Err(TreasuryCurveError::OutsideDateRange(d))
+            }
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /// fetch an entire year of Treasury curves
@@ -39,8 +51,16 @@ pub fn fetch_year(requst_year: i32) -> Result<TreasuryCurveHistory, TreasuryCurv
     TreasuryCurveHistory::try_from(TreasuryCurveCsv(fetch_csv_year(requst_year)?))
 }
 
+fn date_at_start_of_year(error_str: &str) -> bool {
+    let fd = utility::date_format_error();
+    let date = Date::parse(error_str, &fd).unwrap();
+    date.to_ordinal_date().1 < 5
+}
+
 #[cfg(test)]
 mod tests {
+    use crate::treasury_curve::Label;
+
     use super::*;
     use time::ext::NumericalDuration;
 
@@ -78,19 +98,41 @@ mod tests {
 
     #[test]
     fn fetch_date_treasury_curve_for_various_test_dates() {
-        let fd = utility::date_format_desc();
+        let fd = utility::date_format_header();
+
+        // FETCH DATA
         // pick 6 dates in history and check each date against 2 points in the curve
         // (1)use old dates, (2) weekend, (3) holiday, (4) recent date, (5) end of year, (6) beginning of year
-        //        let fetch_dates = ["04/22/1999", "03/19/2011", "07/04/2020", "06/01/2023", "12/31/2022", "01/02/2023"];
-        let fetch_dates = ["12/31/2022"];
+        let fetch_dates = [
+            "04/22/1999",
+            "03/19/2011",
+            "07/04/2020",
+            "06/01/2023",
+            "12/31/2022",
+            "01/02/2023",
+        ];
         let fetch_dates: Vec<Date> = fetch_dates
             .iter()
             .map(|d| Date::parse(d, &fd).unwrap())
             .collect();
-        //        let fetch_labels = ["1 Yr", "1 Mo", "6 Mo", "20 Yr", "2 Mo", "5 Yr"];
-        let fetch_labels = ["2 Mo"];
-        //        let test_dates = ["04/22/1999", "03/18/2011", "07/02/2020", "06/01/2023", "12/30/2022", "12/30/2022"];
-        let test_dates = ["12/30/2022"];
+        let fetch_labels = [
+            Label::Yr1,
+            Label::Mo1,
+            Label::Mo6,
+            Label::Yr20,
+            Label::Mo2,
+            Label::Yr5,
+        ];
+
+        // TEST DATA
+        let test_dates = [
+            "04/22/1999",
+            "03/18/2011",
+            "07/02/2020",
+            "06/01/2023",
+            "12/30/2022",
+            "12/30/2022",
+        ];
         let test_dates: Vec<Date> = test_dates
             .iter()
             .map(|d| Date::parse(d, &fd).unwrap())
@@ -105,7 +147,7 @@ mod tests {
             match fetch_date(*d) {
                 Ok((date, curve)) => {
                     date_results.push(date);
-                    curve_results.push(curve.get_label(fetch_labels[i]).unwrap().unwrap());
+                    curve_results.push(curve.get_label(fetch_labels[i]).unwrap());
                 }
                 Err(e) => {
                     println!("Error on date: {d}");
@@ -113,7 +155,6 @@ mod tests {
                 }
             }
         }
-
         assert_eq!(date_results.as_slice(), test_dates);
         assert_eq!(curve_results.as_slice(), test_results);
     }
